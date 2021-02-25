@@ -31,7 +31,19 @@
 #import "CPTFieldFunctionDataSource.h"
 #import "tgmath.h"
 
+#include <search.h>
+
 #define MAXISOCURVES 21
+
+/**
+ *  @brief Enumeration of contour  border dimension & direction
+ **/
+typedef NS_ENUM (int, CPTContourBorderDimensionDirection) {
+    CPTContourBorderDimensionDirectionXForward     = 0,   ///< contour border dimension & direction along x and small to large dimension
+    CPTContourBorderDimensionDirectionYForward     = 1,   ///< contour border dimension & direction along y and small to large dimension
+    CPTContourBorderDimensionDirectionXBackward    = 2,   ///< contour border dimension & direction along x and large to small dimension
+    CPTContourBorderDimensionDirectionYBackward    = 3    ///< contour border dimension & direction along y and large to small dimension
+};
 
 /** @defgroup plotAnimationContourPlot Contour Plot
  *  @brief Contour plot properties that can be animated using Core Animation.
@@ -62,8 +74,10 @@ typedef struct {
 
 void initContourPoints(ContourPoints *a, size_t initialSize);
 void insertContourPoints(ContourPoints *a, CGPoint element);
+void reverseContourPoints(ContourPoints *a);
 void clearContourPoints(ContourPoints *a);
 void freeContourPoints(ContourPoints *a);
+void swap(CGPoint* a, CGPoint* b);
 
 void initContourPoints(ContourPoints *a, size_t initialSize) {
     a->array = static_cast<CGPoint*>(calloc(initialSize, sizeof(CGPoint)));
@@ -81,6 +95,19 @@ void insertContourPoints(ContourPoints *a, CGPoint element) {
     a->array[a->used++] = element;
 }
 
+// Function to reverse the array through pointers
+void reverseContourPoints(ContourPoints *a) {
+    // pointer1 pointing at the beginning of the array
+    CGPoint *pointer1 = a->array;
+    // pointer2 pointing at end of the array
+    CGPoint*pointer2 = a->array + a->used - 1;
+    while (pointer1 < pointer2) {
+        swap(pointer1, pointer2);
+        pointer1++;
+        pointer2--;
+    }
+}
+
 void clearContourPoints(ContourPoints *a) {
     a->used = 0;
 }
@@ -91,6 +118,143 @@ void freeContourPoints(ContourPoints *a) {
     a->used = a->size = 0;
 }
 
+// Function to swap two memory contents
+void swap(CGPoint* a, CGPoint* b) {
+    CGPoint temp = *a;
+    *a = *b;
+    *b = temp;
+}
+
+
+/** @brief A structure used internally by CPTContourPlot to search for isoCurves intersecting the border.
+ **/
+
+typedef struct {
+    CGPoint startPoint;
+    unsigned int index;
+    unsigned int dummy;  // for struct spacing
+} Strip;
+
+typedef struct {
+    Strip *array;
+    size_t used;
+    size_t size;
+} Strips;
+
+void initStrips(Strips *a, size_t initialSize);
+void insertStrips(Strips *a, Strip element);
+void sortStrips(Strips *a, CPTContourBorderDimensionDirection borderdirection);
+void clearStrips(Strips *a);
+void freeStrips(Strips *a);
+int compareBorderStripsXForward(const void *a, const void *b);
+int compareBorderStripsYForward(const void *a, const void *b);
+int compareBorderStripsXBackward(const void *a, const void *b);
+int compareBorderStripsYBackward(const void *a, const void *b);
+
+void initStrips(Strips *a, size_t initialSize) {
+    a->array = static_cast<Strip*>(calloc(initialSize, sizeof(Strip)));
+    a->used = 0;
+    a->size = initialSize;
+}
+
+void insertStrips(Strips *a, Strip element) {
+    // a->used is the number of used entries, because a->array[a->used++] updates a->used only *after* the array has been accessed.
+    // Therefore a->used can go up to a->size
+    if (a->used == a->size) {
+        a->size *= 2;
+        a->array = static_cast<Strip*>(realloc(a->array, a->size * sizeof(Strip)));
+    }
+    element.dummy = 0;
+    a->array[a->used++] = element;
+}
+
+void sortStrips(Strips *a, CPTContourBorderDimensionDirection borderdirection) {
+    
+    switch ( borderdirection ) {
+        case CPTContourBorderDimensionDirectionXForward:
+            qsort(a->array, a->used, sizeof(Strip), compareBorderStripsXForward);
+            break;
+        case CPTContourBorderDimensionDirectionYForward:
+            qsort(a->array, a->used, sizeof(Strip), compareBorderStripsYForward);
+            break;
+        case CPTContourBorderDimensionDirectionXBackward:
+            qsort(a->array, a->used, sizeof(Strip), compareBorderStripsXBackward);
+            break;
+        default:
+            qsort(a->array, a->used, sizeof(Strip), compareBorderStripsYBackward);
+            break;
+    }
+}
+
+void clearStrips(Strips *a) {
+    a->used = 0;
+}
+
+void freeStrips(Strips *a) {
+    free(a->array);
+    a->array = NULL;
+    a->used = a->size = 0;
+}
+
+int compareBorderStripsXForward(const void *a, const void *b) {
+    Strip *aO = const_cast<Strip *>(reinterpret_cast<const Strip *>(a));
+    Strip *bO = const_cast<Strip *>(reinterpret_cast<const Strip *>(b));
+    
+    if (aO->startPoint.x > bO->startPoint.x) {
+        return 1;
+    }
+    else if (aO->startPoint.x < bO->startPoint.x) {
+        return -1;
+    }
+    else {
+        return 0;
+    }
+}
+
+int compareBorderStripsYForward(const void *a, const void *b) {
+    Strip *aO = const_cast<Strip *>(reinterpret_cast<const Strip *>(a));
+    Strip *bO = const_cast<Strip *>(reinterpret_cast<const Strip *>(b));
+    
+    if (aO->startPoint.y > bO->startPoint.y) {
+        return 1;
+    }
+    else if (aO->startPoint.y < bO->startPoint.y) {
+        return -1;
+    }
+    else {
+        return 0;
+    }
+}
+
+int compareBorderStripsXBackward(const void *a, const void *b) {
+    Strip *aO = const_cast<Strip *>(reinterpret_cast<const Strip *>(a));
+    Strip *bO = const_cast<Strip *>(reinterpret_cast<const Strip *>(b));
+    
+    if (aO->startPoint.x < bO->startPoint.x) {
+        return 1;
+    }
+    else if (aO->startPoint.x > bO->startPoint.x) {
+        return -1;
+    }
+    else {
+        return 0;
+    }
+}
+
+int compareBorderStripsYBackward(const void *a, const void *b) {
+    Strip *aO = const_cast<Strip *>(reinterpret_cast<const Strip *>(a));
+    Strip *bO = const_cast<Strip *>(reinterpret_cast<const Strip *>(b));
+    
+    if (aO->startPoint.y < bO->startPoint.y) {
+        return 1;
+    }
+    else if (aO->startPoint.y > bO->startPoint.y) {
+        return -1;
+    }
+    else {
+        return 0;
+    }
+}
 
 @interface CPTContourPlot() {
     @private
@@ -100,10 +264,6 @@ void freeContourPoints(ContourPoints *a) {
     int noRowsFirst;               // primary    grid, number of rows
     int noColumnsSecondary;        // secondary grid, number of columns
     int noRowsSecondary;           // secondary grid, number of rows
-    
-    // Work functions and variables
-    
-
 }
 @property (nonatomic, readwrite, copy, nullable) CPTNumberArray *xValues;
 @property (nonatomic, readwrite, copy, nullable) CPTNumberArray *yValues;
@@ -129,9 +289,8 @@ void freeContourPoints(ContourPoints *a) {
 
 -(void)calculatePointsToDraw:(nonnull BOOL *)pointDrawFlags numberOfPoints:(NSUInteger)dataCount forPlotSpace:(nonnull CPTXYPlotSpace *)xyPlotSpace includeVisiblePointsOnly:(BOOL)visibleOnly;
 -(void)calculateViewPoints:(nonnull CGPoint*)viewPoints withDrawPointFlags:(nonnull BOOL *)drawPointFlags numberOfPoints:(NSUInteger)dataCount;
--(void)alignViewPointsToUserSpace:(nonnull CGPoint*)viewPoints withContext:(nonnull CGContextRef)context drawPointFlags:(nonnull BOOL *)drawPointFlag numberOfPoints:(NSUInteger)dataCounts;
+-(void)alignViewPointsToUserSpace:(nonnull CGPoint*)viewPoints withContext:(nonnull CGContextRef)context /*drawPointFlags:(nonnull BOOL *)drawPointFlag*/ numberOfPoints:(NSUInteger)dataCounts;
 -(NSInteger)extremeDrawnPointIndexForFlags:(nonnull BOOL *)pointDrawFlags numberOfPoints:(NSUInteger)dataCount extremeNumIsLowerBound:(BOOL)isLowerBound;
-
 
 -(CPTLineStyle *)isoCurveLineStyleForIndex:(NSUInteger)idx;
 
@@ -155,16 +314,17 @@ void freeContourPoints(ContourPoints *a) {
 @dynamic functionValues;
 
 
-/** @property nullable id<CPTPlotDataSource> contourAppearanceDataSource
- *  @brief The appearance data source for the plot.
- **/
-@synthesize contourAppearanceDataSource;
-
 /** @property CPTLineStyle *isoCurveLineStyle
  *  @brief The line style of the contours.
  *  Set to @nil to have no Contours. Default is a black line style.
  **/
 @synthesize isoCurveLineStyle;
+
+/** @property CPTFill *isoCurveFill
+ *  @brief The fill of the contours.
+ *  Set to @nil to have no contour fill. Default is a white fill.
+ **/
+@synthesize isoCurveFill;
 
 /** @property double minFunctionValue
  *  @brief The minimum value of the Contour Function.
@@ -363,8 +523,13 @@ void freeContourPoints(ContourPoints *a) {
     if ( (self = [super initWithLayer:layer]) ) {
         CPTContourPlot *theLayer = static_cast<CPTContourPlot*>(layer);
 
+        isoCurvesValues          = theLayer->isoCurvesValues;
         isoCurveLineStyle        = theLayer->isoCurveLineStyle;
-//        usesEvenOddClipRule = theLayer->usesEvenOddClipRule;
+        isoCurvesFills           = theLayer->isoCurvesFills;
+        isoCurvesLabels          = theLayer->isoCurvesLabels;
+        isoCurvesLabelAnnotations = theLayer->isoCurvesLabelAnnotations;
+        isoCurvesLabelsPositions = theLayer->isoCurvesLabelsPositions;
+        isoCurvesNoStrips        = theLayer->isoCurvesNoStrips;
 
         pointingDeviceDownIndex = NSNotFound;
     }
@@ -372,33 +537,37 @@ void freeContourPoints(ContourPoints *a) {
 }
 
 - (void)dealloc {
-    if(isoCurvesValues != nil){
-        [isoCurvesValues removeAllObjects];
-        isoCurvesValues = nil;
+    [self clearOut];
+}
+
+- (void)clearOut {
+    if(self.isoCurvesValues != nil){
+        [self.isoCurvesValues removeAllObjects];
+        self.isoCurvesValues = nil;
     }
-    if(isoCurvesLineStyles != nil) {
-        [isoCurvesLineStyles removeAllObjects];
-        isoCurvesLineStyles = nil;
+    if(self.isoCurvesLineStyles != nil) {
+        [self.isoCurvesLineStyles removeAllObjects];
+        self.isoCurvesLineStyles = nil;
     }
-    if(isoCurvesFills != nil) {
-        [isoCurvesFills removeAllObjects];
-        isoCurvesFills = nil;
+    if(self.isoCurvesFills != nil) {
+        [self.isoCurvesFills removeAllObjects];
+        self.isoCurvesFills = nil;
     }
-    if(isoCurvesLabels != nil) {
-        [isoCurvesLabels removeAllObjects];
-        isoCurvesLabels = nil;
+    if(self.isoCurvesLabels != nil) {
+        [self.isoCurvesLabels removeAllObjects];
+        self.isoCurvesLabels = nil;
     }
-    if(isoCurvesLabelAnnotations != nil) {
-        [isoCurvesLabelAnnotations removeAllObjects];
-        isoCurvesLabelAnnotations = nil;
+    if(self.isoCurvesLabelAnnotations != nil) {
+        [self.isoCurvesLabelAnnotations removeAllObjects];
+        self.isoCurvesLabelAnnotations = nil;
     }
-    if(isoCurvesLabelsPositions != nil) {
-        [isoCurvesLabelsPositions removeAllObjects];
-        isoCurvesLabelsPositions = nil;
+    if(self.isoCurvesLabelsPositions != nil) {
+        [self.isoCurvesLabelsPositions removeAllObjects];
+        self.isoCurvesLabelsPositions = nil;
     }
-    if(isoCurvesNoStrips != nil) {
-        [isoCurvesNoStrips removeAllObjects];
-        isoCurvesNoStrips = nil;
+    if(self.isoCurvesNoStrips != nil) {
+        [self.isoCurvesNoStrips removeAllObjects];
+        self.isoCurvesNoStrips = nil;
     }
 }
 
@@ -412,7 +581,20 @@ void freeContourPoints(ContourPoints *a) {
     [super encodeWithCoder:coder];
     
     [coder encodeObject:self.isoCurveLineStyle forKey:@"CPTContourPlot.isoCurveLineStyle"];
-
+    [coder encodeObject:self.isoCurveFill forKey:@"CPTContourPlot.isoCurveFill"];
+    [coder encodeDouble:self.minFunctionValue forKey:@"CPTContourPlot.minFunctionValue"];
+    [coder encodeDouble:self.maxFunctionValue forKey:@"CPTContourPlot.maxFunctionValue"];
+    [coder encodeInteger:static_cast<NSInteger>(self.noIsoCurves) forKey:@"CPTContourPlot.noIsoCurves"];
+    [coder encodeInteger:static_cast<NSInteger>(self.interpolation) forKey:@"CPTContourPlot.interpolation"];
+    [coder encodeInteger:static_cast<NSInteger>(self.curvedInterpolationOption) forKey:@"CPTContourPlot.curvedInterpolationOption"];
+    [coder encodeCGFloat:self.curvedInterpolationCustomAlpha forKey:@"CPTContourPlot.curvedInterpolationCustomAlpha"];
+    [coder encodeCGFloat:self.isoCurvesLabelOffset forKey:@"CPTContourPlot.isoCurvesLabelOffset"];
+    [coder encodeCGFloat:self.isoCurvesLabelRotation forKey:@"CPTContourPlot.isoCurvesLabelRotation"];
+    [coder encodeObject:self.isoCurvesLabelTextStyle forKey:@"CPTContourPlot.isoCurvesLabelTextStyle"];
+    [coder encodeObject:self.isoCurvesLabelFormatter forKey:@"CPTContourPlot.isoCurvesLabelFormatter"];
+    [coder encodeObject:self.isoCurvesLabelShadow forKey:@"CPTContourPlot.isoCurvesLabelShadow"];
+    [coder encodeBool:self.showIsoCurvesLabels forKey:@"CPTContourPlot.showIsoCurvesLabels"];
+    
     // No need to archive these properties:
     // pointingDeviceDownIndex
 }
@@ -422,6 +604,22 @@ void freeContourPoints(ContourPoints *a) {
     if ( (self = [super initWithCoder:coder]) ) {
         isoCurveLineStyle = [[coder decodeObjectOfClass:[CPTLineStyle class]
                                             forKey:@"CPTContourPlot.isoCurveLineStyle"] copy];
+        isoCurveFill = [[coder decodeObjectOfClass:[CPTFill class]
+                                            forKey:@"CPTContourPlot.isoCurveFill"] copy];
+        minFunctionValue = [coder decodeDoubleForKey:@"CPTContourPlot.minFunctionValue"];
+        maxFunctionValue = [coder decodeDoubleForKey:@"CPTContourPlot.maxFunctionValue"];
+        noIsoCurves = static_cast<NSUInteger>([coder decodeIntegerForKey:@"CPTContourPlot.noIsoCurves"]);
+        interpolation = static_cast<CPTContourPlotInterpolation>([coder decodeIntegerForKey:@"CPTContourPlot.interpolation"]);
+        curvedInterpolationOption = static_cast<CPTContourPlotCurvedInterpolationOption>([coder decodeIntegerForKey:@"CPTContourPlot.curvedInterpolationOption"]);
+        curvedInterpolationCustomAlpha = [coder decodeCGFloatForKey:@"CPTContourPlot.curvedInterpolationCustomAlpha"];
+        isoCurvesLabelOffset = [coder decodeCGFloatForKey:@"CPTContourPlot.isoCurvesLabelOffset"];
+        isoCurvesLabelRotation = [coder decodeCGFloatForKey:@"CPTContourPlot.isoCurvesLabelRotation"];
+        isoCurvesLabelTextStyle = [[coder decodeObjectOfClass:[CPTTextStyle class]
+                                                       forKey:@"CPTContourPlot.isoCurvesLabelTextStyle"] copy];
+        isoCurvesLabelFormatter = [coder decodeObjectForKey:@"CPTContourPlot.isoCurvesLabelFormatter"];
+        isoCurvesLabelShadow = [[coder decodeObjectOfClass:[NSFormatter class]
+                                                    forKey:@"CPTContourPlot.isoCurvesLabelShadow"] copy];
+        showIsoCurvesLabels = [coder decodeBoolForKey:@"CPTContourPlot.showIsoCurvesLabels"];
         
         pointingDeviceDownIndex = NSNotFound;
     }
@@ -559,29 +757,29 @@ void freeContourPoints(ContourPoints *a) {
     }
 }
 
--(void)alignViewPointsToUserSpace:(nonnull CGPoint*)viewPoints withContext:(nonnull CGContextRef)context drawPointFlags:(nonnull BOOL *)drawPointFlags numberOfPoints:(NSUInteger)dataCount {
+-(void)alignViewPointsToUserSpace:(nonnull CGPoint*)viewPoints withContext:(nonnull CGContextRef)context /*drawPointFlags:(nonnull BOOL *)drawPointFlags*/ numberOfPoints:(NSUInteger)dataCount {
     // Align to device pixels if there is a data line.
     // Otherwise, align to view space, so fills are sharp at edges.
     if ( self.isoCurveLineStyle.lineWidth > static_cast<CGFloat>(0.0) ) {
         dispatch_apply(dataCount, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^(size_t i) {
-            if ( drawPointFlags[i] ) {
+//            if ( drawPointFlags[i] ) {
                 CGFloat x       = viewPoints[i].x;
                 CGFloat y       = viewPoints[i].y;
                 CGPoint pos     = CPTAlignPointToUserSpace(context,  CGPointMake( static_cast<CGFloat>(x), static_cast<CGFloat>(y)) );
                 viewPoints[i].x = pos.x;
                 viewPoints[i].y = pos.y;
-            }
+//            }
         });
     }
     else {
         dispatch_apply(dataCount, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^(size_t i) {
-            if ( drawPointFlags[i] ) {
+//            if ( drawPointFlags[i] ) {
                 CGFloat x       = viewPoints[i].x;
                 CGFloat y       = viewPoints[i].y;
                 CGPoint pos     = CPTAlignIntegralPointToUserSpace(context, CGPointMake( static_cast<CGFloat>(x), static_cast<CGFloat>(y)) );
                 viewPoints[i].x = pos.x;
                 viewPoints[i].y = pos.y;
-            }
+//            }
         });
     }
 }
@@ -662,7 +860,7 @@ void freeContourPoints(ContourPoints *a) {
     id<CPTContourPlotDataSource> theDataSource = static_cast<id<CPTContourPlotDataSource>>(self.dataSource);
     
     if ([theDataSource isKindOfClass:[CPTFieldFunctionDataSource class]]) {
-        theDataSource = static_cast<id<CPTContourPlotDataSource>>(self.contourAppearanceDataSource);
+        theDataSource = static_cast<id<CPTContourPlotDataSource>>(self.appearanceDataSource);
     }
 
     BOOL needsLegendUpdate = NO;
@@ -723,7 +921,7 @@ void freeContourPoints(ContourPoints *a) {
     id<CPTContourPlotDataSource> theDataSource = static_cast<id<CPTContourPlotDataSource>>(self.dataSource);
     
     if ([theDataSource isKindOfClass:[CPTFieldFunctionDataSource class]]) {
-        theDataSource = static_cast<id<CPTContourPlotDataSource>>(self.contourAppearanceDataSource);
+        theDataSource = static_cast<id<CPTContourPlotDataSource>>(self.appearanceDataSource);
     }
 
     if ( [theDataSource respondsToSelector:@selector(fillsForContourPlot:isoCurveIndexRange:)] ) {
@@ -782,7 +980,7 @@ void freeContourPoints(ContourPoints *a) {
     id<CPTContourPlotDataSource> theDataSource = static_cast<id<CPTContourPlotDataSource>>(self.dataSource);
     
     if ([theDataSource isKindOfClass:[CPTFieldFunctionDataSource class]]) {
-        theDataSource = static_cast<id<CPTContourPlotDataSource>>(self.contourAppearanceDataSource);
+        theDataSource = static_cast<id<CPTContourPlotDataSource>>(self.appearanceDataSource);
     }
 
     if ( [theDataSource respondsToSelector:@selector(isoCurveLabelsForPlot:isoCurveIndexRange:)] ) {
@@ -830,6 +1028,8 @@ void freeContourPoints(ContourPoints *a) {
         return;
     }
 
+    CGContextClearRect(context, CGContextGetClipBoundingBox(context));
+    
     CPTMutableNumericData *xValueData = [self cachedNumbersForField:CPTContourPlotFieldX];
     CPTMutableNumericData *yValueData = [self cachedNumbersForField:CPTContourPlotFieldY];
 
@@ -878,35 +1078,73 @@ void freeContourPoints(ContourPoints *a) {
             planesValues[iPlane] = _adjustedMinFunctionValue + static_cast<double>(iPlane) * step;
         }
         
-        double limit0, limit1;
+        double limit0, limit1, limit2, limit3;
         if (thePlotSpace.xRange.lengthDouble > thePlotSpace.yRange.lengthDouble) {
             if ([self.limits[0] doubleValue] == -DBL_MAX && [self.limits[1] doubleValue] == DBL_MAX) {
-                limit0 = [thePlotSpace.xRange.location doubleValue];
-                limit1 = [thePlotSpace.xRange.end doubleValue];
+                limit0 = thePlotSpace.xRange.locationDouble;
+                limit1 = thePlotSpace.xRange.endDouble;
+                limit2 = thePlotSpace.yRange.midPointDouble - thePlotSpace.xRange.lengthDouble / 2.0;
+                limit3 = thePlotSpace.yRange.midPointDouble + thePlotSpace.xRange.lengthDouble / 2.0;
             }
             else {
                 limit0 = [self.limits[0] doubleValue];
+                limit2 = [self.limits[0] doubleValue];
                 limit1 = [self.limits[1] doubleValue];
+                limit3 = [self.limits[1] doubleValue];
             }
         }
         else {
             if ([self.limits[2] doubleValue] == -DBL_MAX && [self.limits[3] doubleValue] == DBL_MAX) {
-                limit0 = [thePlotSpace.yRange.location doubleValue];
-                limit1 = [thePlotSpace.yRange.end doubleValue];
+                limit2 = thePlotSpace.yRange.locationDouble;
+                limit3 = thePlotSpace.yRange.endDouble;
+                limit0 = thePlotSpace.xRange.midPointDouble - thePlotSpace.yRange.lengthDouble / 2.0;
+                limit1 = thePlotSpace.xRange.midPointDouble + thePlotSpace.yRange.lengthDouble / 2.0;
             }
             else {
                 limit0 = [self.limits[2] doubleValue];
+                limit2 = [self.limits[2] doubleValue];
                 limit1 = [self.limits[3] doubleValue];
+                limit3 = [self.limits[3] doubleValue];
             }
         }
-        double _limits[4] = { limit0 * 1.01, limit1 * 1.01, limit0 * 1.01, limit1 * 1.01 };
+
+        double _limits[4] = { limit0, limit1, limit2, limit3 };
         COREPLOT_CONTOURS::CContours *contours = new COREPLOT_CONTOURS::CContours(static_cast<const int>(self.noIsoCurves), planesValues, static_cast<double*>(_limits));
         contours->setFieldBlock(self.dataSourceBlock);
         contours->generate();
         
+        self.scaleX = CPTDecimalDoubleValue(self.plotArea.widthDecimal) / thePlotSpace.xRange.lengthDouble;
+        self.scaleY = CPTDecimalDoubleValue(self.plotArea.heightDecimal) / thePlotSpace.yRange.lengthDouble;
+        self.maxWidthPixels = CPTDecimalDoubleValue(self.plotArea.widthDecimal);
+        self.maxHeightPixels = CPTDecimalDoubleValue(self.plotArea.heightDecimal);
+        
+        [self clearOut];
+        
+        self.isoCurvesLineStyles = [[CPTMutableLineStyleArray alloc] init];
+        for(NSUInteger i = 0; i < self.noIsoCurves; i++) {
+            CPTMutableLineStyle *lineStyle = [CPTMutableLineStyle lineStyleWithStyle: self.isoCurveLineStyle];
+            [self.isoCurvesLineStyles addObject: lineStyle];
+        }
+        self.isoCurvesFills = [[CPTMutableFillArray alloc] init];
+        for(NSUInteger i = 0; i < self.noIsoCurves; i++) {
+            id nilObject                    = [CPTPlot nilData];
+            [self.isoCurvesFills addObject: nilObject];
+        }
+        
+        self.isoCurvesLabels = [[CPTMutableLayerArray alloc] init];
+        for(NSUInteger i = 0; i < self.noIsoCurves; i++) {
+            id nilObject                    = [CPTPlot nilData];
+            [self.isoCurvesLabels addObject: nilObject];
+        }
+        self.needsIsoCurvesRelabel = YES;
+        
+        self.isoCurvesValues = [CPTMutableNumberArray arrayWithCapacity:self.noIsoCurves];
+        self.isoCurvesNoStrips = [CPTMutableNumberArray arrayWithCapacity:self.noIsoCurves];
+        self.isoCurvesLabelsPositions = static_cast<NSMutableArray<CPTMutableValueArray*>*>([NSMutableArray arrayWithCapacity:self.noIsoCurves]);
+    
         // draw line strips
-        COREPLOT_CONTOURS::CLineStripList* pStripList;
-        COREPLOT_CONTOURS::CLineStrip* pStrip;
+        COREPLOT_CONTOURS::CLineStripList *pStripList = NULL;
+        COREPLOT_CONTOURS::CLineStrip *pStrip = NULL;
         unsigned int index;
         COREPLOT_CONTOURS::CLineStripList::iterator pos;
         COREPLOT_CONTOURS::CLineStrip::iterator pos2;
@@ -915,146 +1153,141 @@ void freeContourPoints(ContourPoints *a) {
         ContourPoints stripContours;
         initContourPoints(&stripContours, 50);
         
-        self.scaleX = CPTDecimalDoubleValue(self.plotArea.widthDecimal) / thePlotSpace.xRange.lengthDouble;
-        self.scaleY = CPTDecimalDoubleValue(self.plotArea.heightDecimal) / thePlotSpace.yRange.lengthDouble;
-        self.maxWidthPixels = CPTDecimalDoubleValue(self.plotArea.widthDecimal);
-        self.maxHeightPixels = CPTDecimalDoubleValue(self.plotArea.heightDecimal);
-        
-//        if(self.isoCurvesValues == nil) {
-            self.isoCurvesLineStyles = [[CPTMutableLineStyleArray alloc] init];
-            for(NSUInteger i = 0; i < self.noIsoCurves; i++) {
-                CPTMutableLineStyle *lineStyle = [CPTMutableLineStyle lineStyleWithStyle: self.isoCurveLineStyle];
-                [self.isoCurvesLineStyles addObject: lineStyle];
-            }
-            self.isoCurvesFills = [[CPTMutableFillArray alloc] init];
-            for(NSUInteger i = 0; i < self.noIsoCurves; i++) {
-                id nilObject                    = [CPTPlot nilData];
-                [self.isoCurvesFills addObject: nilObject];
-            }
-            
-            self.isoCurvesLabels = [[CPTMutableLayerArray alloc] init];
-            for(NSUInteger i = 0; i < self.noIsoCurves; i++) {
-                id nilObject                    = [CPTPlot nilData];
-                [self.isoCurvesLabels addObject: nilObject];
-            }
-            self.needsIsoCurvesRelabel = YES;
-            
-            self.isoCurvesValues = [CPTMutableNumberArray arrayWithCapacity:self.noIsoCurves];
-            self.isoCurvesNoStrips = [CPTMutableNumberArray arrayWithCapacity:self.noIsoCurves];
-            self.isoCurvesLabelsPositions = static_cast<NSMutableArray<CPTMutableValueArray*>*>([NSMutableArray arrayWithCapacity:self.noIsoCurves]);
-            for ( unsigned int iPlane = 0; iPlane < contours->getNPlanes(); iPlane++ ) {
-                pStripList = contours->getListContour()->GetLines(iPlane);
-                if (pStripList->size() != 0) {
-                    NSNumber *isoCurveValue = [NSNumber numberWithDouble: contours->getPlane(iPlane)];
-                    [self.isoCurvesValues addObject:isoCurveValue];
-                    
-                    CPTMutableValueArray *positionsPerStrip = [CPTMutableValueArray arrayWithCapacity:pStripList->size()];
-                    for (pos=pStripList->begin(); pos != pStripList->end() ; pos++) {
-                        pStrip = (*pos);
-                        pos2 = next(pStrip->begin(), pStrip->size() / 2);
-                        index=(*pos2); // retreiving index
-                        x = contours->getListContour()->GetXi(static_cast<int>(index));
-                        y = contours->getListContour()->GetYi(static_cast<int>(index));
-                        point = CGPointMake(x, y);
+        for ( unsigned int iPlane = 0; iPlane < contours->getNPlanes(); iPlane++ ) {
+            pStripList = contours->getListContour()->GetLines(iPlane);
+            if (pStripList->size() != 0) {
+                NSNumber *isoCurveValue = [NSNumber numberWithDouble: contours->getPlane(iPlane)];
+                [self.isoCurvesValues addObject:isoCurveValue];
+                // position one set of contour labels
+                CPTMutableValueArray *positionsPerStrip = [CPTMutableValueArray arrayWithCapacity:pStripList->size()];
+                for (pos=pStripList->begin(); pos != pStripList->end() ; pos++) {
+                    pStrip = (*pos);
+                    pos2 = next(pStrip->begin(), pStrip->size() / 2);
+                    index=(*pos2); // retreiving index
+                    x = contours->getListContour()->GetXi(static_cast<int>(index));
+                    y = contours->getListContour()->GetYi(static_cast<int>(index));
+                    point = CGPointMake(x, y);
 #if TARGET_OS_OSX
-                        NSValue *positionValue = [NSValue valueWithPoint:point];
+                    NSValue *positionValue = [NSValue valueWithPoint:point];
 #else
-                        NSValue *positionValue = [NSValue valueWithCGPoint:point];
+                    NSValue *positionValue = [NSValue valueWithCGPoint:point];
 #endif
-//                        if (x >= limit0 && x <= limit1 && y >= limit0 && y <= limit1) {
-                            [positionsPerStrip addObject:positionValue];
-//                        }
-                    }
-                    if (positionsPerStrip.count > 0) {
-                        NSNumber *isoCurveNoStrips = [NSNumber numberWithDouble: positionsPerStrip.count];
-                        [self.isoCurvesNoStrips addObject:isoCurveNoStrips];
-                        [self.isoCurvesLabelsPositions addObject:positionsPerStrip];
-                    }
+                    [positionsPerStrip addObject:positionValue];
+                }
+                if (positionsPerStrip.count > 0) {
+                    NSNumber *isoCurveNoStrips = [NSNumber numberWithDouble: positionsPerStrip.count];
+                    [self.isoCurvesNoStrips addObject:isoCurveNoStrips];
+                    [self.isoCurvesLabelsPositions addObject:positionsPerStrip];
                 }
             }
-//        }
+        }
+
         [self reloadContourLineStyles];
         [self reloadContourFills];
         [self reloadContourLabels];
         
-        CGPathRef previousDataLinePath = NULL; // used for filling
-        CGPathRef dataLinePath = NULL;
-        for ( unsigned int iPlane = 0; iPlane < contours->getNPlanes(); iPlane++ ) {
-//            contours->dumpPlane(iPlane);
-            CPTMutableLineStyle *theContourLineStyle = [CPTMutableLineStyle lineStyleWithStyle: [self isoCurveLineStyleForIndex:iPlane]];
-            if(theContourLineStyle == nil) {
-                theContourLineStyle          = [self.isoCurveLineStyle mutableCopy];
-                theContourLineStyle.lineColor = [CPTColor colorWithComponentRed:static_cast<CGFloat>(static_cast<float>(iPlane) / static_cast<float>(contours->getNPlanes())) green:static_cast<CGFloat>(1.0f - static_cast<float>(iPlane) / static_cast<float>(contours->getNPlanes())) blue:0.0 alpha:1.0];
+        if ( [[self.isoCurvesFills objectAtIndex:0] isKindOfClass:[CPTFill class]] ) {
+            CGPoint cornerPoints[2] = {
+                CGPointMake((_limits[0] - thePlotSpace.xRange.locationDouble) * self.scaleX, (_limits[2] - thePlotSpace.yRange.locationDouble) * self.scaleY),
+                CGPointMake((_limits[1] - thePlotSpace.xRange.locationDouble) * self.scaleX, (_limits[3] - thePlotSpace.yRange.locationDouble) * self.scaleY)
+            };
+//            BOOL cornerDrawPointFlags[2] = { TRUE, TRUE };
+            if ( pixelAlign ) {
+                [self alignViewPointsToUserSpace:cornerPoints withContext:context /*drawPointFlags:cornerDrawPointFlags*/ numberOfPoints:2];
             }
-            theContourLineStyle.lineWidth = self.isoCurveLineStyle.lineWidth;
+            // easier naming edges
+            CGFloat leftEdge = cornerPoints[0].x;
+            CGFloat bottomEdge = cornerPoints[0].y;
+            CGFloat rightEdge = cornerPoints[1].x;
+            CGFloat topEdge = cornerPoints[1].y;
             
-//            CPTFill *theFill = [self.isoCurvesFills objectAtIndex:iPlane];
+            // find iplane where isocurve value covers +/- zero
+            NSUInteger _zeroValueIndex = [[self.isoCurvesValues subarrayWithRange:NSMakeRange(0, self.isoCurvesValues.count - 1)] indexOfObjectPassingTest:^BOOL(NSNumber *value, NSUInteger idx, BOOL *stop) {
+                if ( value.doubleValue <= 0.0 && [self.isoCurvesValues[idx+1] doubleValue] >= 0.0 ) {
+                    *stop = YES;
+                    return YES;
+                }
+                else {
+                    return NO;
+                }
+            }];
+            if ( _zeroValueIndex == NSNotFound ) {
+                _zeroValueIndex = 0;
+            }
+            else {
+                _zeroValueIndex += (contours->getNPlanes() - self.isoCurvesValues.count) / 2 + 1;
+            }
+            unsigned int zeroValueIndex = static_cast<unsigned int>(_zeroValueIndex);
+
+            CPTFill *theFill = [self.isoCurvesFills objectAtIndex:zeroValueIndex];
+            if ( theFill && [theFill isKindOfClass:[CPTFill class]] ) {
+                CGContextSaveGState(context);
             
-            pStripList = contours->getListContour()->GetLines(iPlane);
-//            NSAssertParameter(pStripList);
-            for (pos=pStripList->begin(); pos != pStripList->end() ; pos++) {
-                pStrip = (*pos);
-//                NSAssertParameter(pStrip);
-                if (pStrip->empty()) {
-                    continue;
+                [theFill fillRect:CGRectMake(leftEdge, bottomEdge, rightEdge - leftEdge, topEdge - bottomEdge) inContext:context];
+            
+                CGContextRestoreGState(context);
+            }
+            
+            
+            for ( unsigned int iPlane =  (contours->getNPlanes() % 2 == 0) ? zeroValueIndex - 1 : zeroValueIndex; iPlane < contours->getNPlanes() - 1; iPlane++ ) {
+                [self drawFillBetweenIsoCurves:context contours:contours Plane:iPlane leftEdge:leftEdge bottomEdge:bottomEdge rightEdge:rightEdge topEdge:topEdge inwards:YES];
+            }
+            for ( unsigned int iPlane = (contours->getNPlanes() % 2 == 0) ? zeroValueIndex /*+ 1*/ : zeroValueIndex; iPlane > 0; iPlane-- ) {
+                [self drawFillBetweenIsoCurves:context contours:contours Plane:iPlane leftEdge:leftEdge bottomEdge:bottomEdge rightEdge:rightEdge topEdge:topEdge inwards:NO];
+            }
+        }
+        
+        // draw the contours with a CPTLinestyle if available
+        if ( [[self.isoCurvesLineStyles objectAtIndex:0] isKindOfClass:[CPTLineStyle class]] ) {
+            CGPathRef dataLinePath = NULL;
+            for ( unsigned int iPlane = 0; iPlane < contours->getNPlanes(); iPlane++ ) {
+    //            contours->dumpPlane(iPlane);
+                CPTMutableLineStyle *theContourLineStyle = [CPTMutableLineStyle lineStyleWithStyle: [self isoCurveLineStyleForIndex:iPlane]];
+                if(theContourLineStyle == nil) {
+                    theContourLineStyle          = [self.isoCurveLineStyle mutableCopy];
+                    theContourLineStyle.lineColor = [CPTColor colorWithComponentRed:static_cast<CGFloat>(static_cast<float>(iPlane) / static_cast<float>(contours->getNPlanes())) green:static_cast<CGFloat>(1.0f - static_cast<float>(iPlane) / static_cast<float>(contours->getNPlanes())) blue:0.0 alpha:1.0];
                 }
+                theContourLineStyle.lineWidth = self.isoCurveLineStyle.lineWidth;
                 
-                for (pos2=pStrip->begin(); pos2 != pStrip->end() ; pos2++) {
-                    // retreiving index
-                    index=(*pos2);
-                    // drawing
-                    x = contours->getListContour()->GetXi(static_cast<int>(index));
-                    y = contours->getListContour()->GetYi(static_cast<int>(index));
-//                    if (x >= limit0 && x <= limit1 && y >= limit0 && y <= limit1) {
-                        point = CGPointMake((x - thePlotSpace.xRange.locationDouble) * self.scaleX, (y - thePlotSpace.yRange.locationDouble) * self.scaleY);
-                        insertContourPoints(&stripContours, point);
-//                    }
-                }
+                pStripList = contours->getListContour()->GetLines(iPlane);
+    
+                for (pos=pStripList->begin(); pos != pStripList->end() ; pos++) {
+                    pStrip = *pos;
+                    if (!pStrip->empty()) {
+                        for (pos2=pStrip->begin(); pos2 != pStrip->end() ; pos2++) {
+                            // retreiving index
+                            index = *pos2;
+                            // drawing
+                            x = contours->getListContour()->GetXi(static_cast<int>(index));
+                            y = contours->getListContour()->GetYi(static_cast<int>(index));
+                            point = CGPointMake((x - thePlotSpace.xRange.locationDouble) * self.scaleX, (y - thePlotSpace.yRange.locationDouble) * self.scaleY);
+                            insertContourPoints(&stripContours, point);
+                        }
 
-                if ( pixelAlign ) {
-                    [self alignViewPointsToUserSpace:stripContours.array withContext:context drawPointFlags:drawPointFlags numberOfPoints:stripContours.used];
-                }
+                        if ( pixelAlign ) {
+                            [self alignViewPointsToUserSpace:stripContours.array withContext:context /*drawPointFlags:drawPointFlags*/ numberOfPoints:stripContours.used];
+                        }
 
-                if ( stripContours.used > 0 ) {
-                    dataLinePath = [self newDataLinePathForViewPoints:stripContours.array indexRange: NSMakeRange(0, stripContours.used)];
+                        if ( stripContours.used > 0 ) {
+                            dataLinePath = [self newDataLinePathForViewPoints:stripContours.array indexRange: NSMakeRange(0, stripContours.used)];
+                        }
+                        
+                        // Draw line
+                        if ( theContourLineStyle && dataLinePath != NULL ) {
+                            CGContextBeginPath(context);
+                            CGContextAddPath(context, dataLinePath);
+                            [theContourLineStyle setLineStyleInContext:context];
+                            [theContourLineStyle strokePathInContext:context];
+                        }
+                        CGPathRelease(dataLinePath);
+                        dataLinePath = NULL;
+                        clearContourPoints(&stripContours);
+                    }
                 }
-                
-//                if ( theFill && previousDataLinePath != NULL ) {
-//                    CGContextSaveGState(context);
-//
-//                    CGContextBeginPath(context);
-//                    CGContextAddPath(context, previousDataLinePath);
-//                    CGContextAddPath(context, dataLinePath);
-//                    [theFill fillPathInContext:context];
-//
-//                    CGContextRestoreGState(context);
-//                }
-//
-//                if (theFill) {
-//                    CGPathRelease(previousDataLinePath);
-//                    previousDataLinePath = CGPathCreateCopy(dataLinePath);
-//                }
-                
-                // Draw line
-                if ( theContourLineStyle && dataLinePath != NULL ) {
-                    
-                    CGContextBeginPath(context);
-                    CGContextAddPath(context, dataLinePath);
-                    [theContourLineStyle setLineStyleInContext:context];
-                    [theContourLineStyle strokePathInContext:context];
-                }
-                CGPathRelease(dataLinePath);
-                dataLinePath = NULL;
-                clearContourPoints(&stripContours);
             }
         }
         freeContourPoints(&stripContours);
-        if (previousDataLinePath != NULL) {
-            CGPathRelease(previousDataLinePath);
-            previousDataLinePath = NULL;
-        }
-            
-        
+
         if(contours != NULL) {
             delete contours;
             contours = NULL;
@@ -1064,6 +1297,360 @@ void freeContourPoints(ContourPoints *a) {
 
     free(viewPoints);
     free(drawPointFlags);
+}
+
+//         since contours are grouped by their isocurve value within a defined rectangle, one needs to search for the inner
+//         contour for the current contour in order to enable filling.
+//         the current contour could be closed or bordered by an edge or a corner.
+//         contour within the current closed contour easy to deal with.
+//         contour within the current contour closed by bordered by an edge or a corner, need to make up the current contour so
+//         it is closed by edge or corner. So having set up the current contour one searches through the contours for the inner
+//         plane value, having found one can now create the closed path for 2 contours and the 4 end points (in corners could be one extra point)
+
+- (void)drawFillBetweenIsoCurves:(nonnull CGContextRef)context contours:(COREPLOT_CONTOURS::CContours *)contours Plane:(unsigned int)Plane leftEdge:(CGFloat)leftEdge bottomEdge:(CGFloat)bottomEdge rightEdge:(CGFloat)rightEdge topEdge:(CGFloat)topEdge inwards:(BOOL)inwards {
+    unsigned int iPlane = Plane;
+    CPTFill *theFill = [self.isoCurvesFills objectAtIndex:inwards ? iPlane: iPlane + 1];
+    if ( theFill && [theFill isKindOfClass:[CPTFill class]] ) { // check there is an actual fill to make
+        
+        /* since contours are grouped by their isocurve value within a defined rectangle, one needs to search for the inner
+         contour for the current contour in order to enable filling.
+         Start in bottom left hand corner and move around perimeter of rectangle till getting back to bottm left */
+            
+        CGPoint perimeterPoints[5] = { CGPointMake(leftEdge, bottomEdge), CGPointMake(rightEdge, bottomEdge), CGPointMake(rightEdge, topEdge), CGPointMake(leftEdge, topEdge), CGPointMake(leftEdge, bottomEdge) };
+        
+        double startSideDimension = 0.0;
+        double endSideDimension = 0.0;
+        double adjacentSideDimension = 0.0;
+        Strips borderStrips[2][4];  // 2 isocurves(inner & outer) by 4 edges
+        Strips closedStrips[2];  // 2 isocurves(inner & outer)
+        // move along btmedge, then up right edge, back along topedge and finally back down left edge to start
+        // looking of boundary intersection point in each isoCurve plane group of points and storing the index for later
+        for ( unsigned int i = 0; i < 2; i++ ) {
+            initStrips(&closedStrips[i], 50);
+            for ( unsigned int j = 0; j < 4; j++ ) {
+                initStrips(&borderStrips[i][j], 50);
+                CPTContourBorderDimensionDirection borderdirection;
+                if ( j % 2 == 0 ) {
+                    startSideDimension = perimeterPoints[j].x;
+                    endSideDimension = perimeterPoints[j+1].x;
+                    if (j > 0) {
+                        borderdirection = CPTContourBorderDimensionDirectionXBackward;
+                        adjacentSideDimension = topEdge;
+                    }
+                    else {
+                        borderdirection = CPTContourBorderDimensionDirectionXForward;
+                        adjacentSideDimension = bottomEdge;
+                    }
+                }
+                else {
+                    startSideDimension = perimeterPoints[j].y;
+                    endSideDimension = perimeterPoints[j+1].y;
+                    if (j > 1) {
+                        borderdirection = CPTContourBorderDimensionDirectionYBackward;
+                        adjacentSideDimension = leftEdge;
+                    }
+                    else {
+                        borderdirection = CPTContourBorderDimensionDirectionYForward;
+                        adjacentSideDimension = rightEdge;
+                    }
+                }
+                
+                [self searchPlaneBorderIsoCurves:context contours:contours Plane:iPlane startSideDimension:startSideDimension endSideDimension:endSideDimension adjacentSideDimension:adjacentSideDimension border:borderdirection BorderStrips:&borderStrips[i][j]];
+                if ( borderStrips[i][j].used > 1 ) {
+                    sortStrips(&borderStrips[i][j], borderdirection);
+                }
+            }
+            // look for all closed strips ie not touching boundary
+            [self searchPlaneClosedIsoCurves:context contours:contours Plane:iPlane ClosedStrips:&closedStrips[i]];
+            // now merge all the sides to one array
+            if (inwards) {
+                iPlane++;
+            }
+            else {
+                iPlane--;
+            }
+        }
+        
+        CGContextSaveGState(context);
+
+        CGContextAddRect(context, CGContextGetClipBoundingBox(context));
+        
+        [self drawBorderedIsoCurve:context contours:contours Plane:Plane BorderStrips:borderStrips[0] ClosedStrips:&closedStrips[0] leftEdge:leftEdge bottomEdge:bottomEdge rightEdge:rightEdge topEdge:topEdge];
+        if ( !CGContextIsPathEmpty(context) ) {
+            CGContextEOClip(context);
+        }
+        
+        unsigned int nextPlane;
+        if ( inwards ) {
+            nextPlane = Plane + 1;
+        }
+        else {
+            nextPlane = Plane - 1;
+        }
+        [self drawBorderedIsoCurve:context contours:contours Plane:nextPlane BorderStrips:borderStrips[1] ClosedStrips:&closedStrips[1] leftEdge:leftEdge bottomEdge:bottomEdge rightEdge:rightEdge topEdge:topEdge];
+//        if ( !CGContextIsPathEmpty(context) ) {
+//            CGContextClip(context);
+//        }
+
+        CGContextRestoreGState(context);
+        
+        [theFill fillPathInContext:context];
+//        CGContextSaveGState(context);
+//        CGContextSetFillColorWithColor(context, theFill.cgColor);
+//        CGContextEOFillPath(context);
+//        CGContextRestoreGState(context);
+        
+        
+        
+        freeStrips(borderStrips[0]);
+        freeStrips(borderStrips[1]);
+        freeStrips(&closedStrips[0]);
+        freeStrips(&closedStrips[1]);
+    }
+}
+
+- (void)searchPlaneClosedIsoCurves:(nonnull CGContextRef)context contours:(COREPLOT_CONTOURS::CContours *)contours Plane:(unsigned int)iPlane ClosedStrips:(Strips*)closedStrips {
+    
+    COREPLOT_CONTOURS::CLineStripList *pStripList = contours->getListContour()->GetLines(iPlane);
+    COREPLOT_CONTOURS::CLineStrip *pStrip = NULL;
+    unsigned int indexStart, indexEnd;
+    COREPLOT_CONTOURS::CLineStripList::iterator pos;
+    COREPLOT_CONTOURS::CLineStrip::iterator pos2;
+    
+    Strip closedStrip;
+    
+    unsigned int index = 0;
+    for (pos=pStripList->begin(); pos != pStripList->end() ; pos++) {
+        pStrip = (*pos);
+        
+        if (pStrip != NULL && !pStrip->empty()) {
+            
+            indexStart = pStrip->front();
+            indexEnd = pStrip->back();
+            
+            if ( indexStart == indexEnd ) {
+                closedStrip.index = index;
+                insertStrips(closedStrips, closedStrip);
+            }
+        }
+        index++;
+    }
+}
+    
+- (void)searchPlaneBorderIsoCurves:(nonnull CGContextRef)context contours:(COREPLOT_CONTOURS::CContours *)contours Plane:(unsigned int)iPlane startSideDimension:(double)startSideDimension endSideDimension:(double)endSideDimension adjacentSideDimension:(double)adjacentSideDimension border:(CPTContourBorderDimensionDirection)border BorderStrips:(Strips*)borderStrips {
+    
+    COREPLOT_CONTOURS::CLineStripList *pStripList = contours->getListContour()->GetLines(iPlane);
+    COREPLOT_CONTOURS::CLineStrip *pStrip = NULL;
+    unsigned int indexStart, indexEnd;
+    COREPLOT_CONTOURS::CLineStripList::iterator pos;
+    COREPLOT_CONTOURS::CLineStrip::iterator pos2;
+    
+    Strip borderStrip;
+    CPTXYPlotSpace *thePlotSpace = static_cast<CPTXYPlotSpace *>(self.plotSpace);
+    BOOL pixelAlign = self.alignsPointsToPixels;
+    
+    unsigned int index = 0;
+    for (pos=pStripList->begin(); pos != pStripList->end() ; pos++) {
+        pStrip = (*pos);
+        
+        if (pStrip != NULL && !pStrip->empty()) {
+            
+            indexStart = pStrip->front();
+            indexEnd = pStrip->back();
+            
+            if ( indexStart != indexEnd ) {
+                double startX = (contours->getListContour()->GetXi(static_cast<int>(indexStart)) - thePlotSpace.xRange.locationDouble) * self.scaleX;
+                double startY = (contours->getListContour()->GetYi(static_cast<int>(indexStart)) - thePlotSpace.yRange.locationDouble) * self.scaleY;
+                double endX = (contours->getListContour()->GetXi(static_cast<int>(indexEnd)) - thePlotSpace.xRange.locationDouble) * self.scaleX;
+                double endY = (contours->getListContour()->GetYi(static_cast<int>(indexEnd)) - thePlotSpace.yRange.locationDouble) * self.scaleY;
+                
+                CGPoint startPoint = CGPointMake(startX, startY);
+                CGPoint endPoint = CGPointMake(endX, endY);
+                CGPoint points[2] = { startPoint, endPoint };
+                
+                if ( pixelAlign ) {
+                    [self alignViewPointsToUserSpace:points withContext:context /*drawPointFlags:drawPointFlags*/ numberOfPoints:2];
+                    startPoint = points[0];
+                    endPoint = points[1];
+                }
+                switch(border) {
+                    case CPTContourBorderDimensionDirectionXForward:
+                    {
+                        if ( startPoint.y == adjacentSideDimension && startPoint.x >= startSideDimension && startPoint.x <= endSideDimension ) {
+                            borderStrip.index = index;
+                            borderStrip.startPoint = startPoint;
+                            insertStrips(borderStrips, borderStrip);
+                        }
+                    }
+                        break;
+                    case CPTContourBorderDimensionDirectionYForward:
+                    {
+                        if ( startPoint.x == adjacentSideDimension && startPoint.y >= startSideDimension && startPoint.y <= endSideDimension ) {
+                            borderStrip.index = index;
+                            borderStrip.startPoint = startPoint;
+                            insertStrips(borderStrips, borderStrip);
+                        }
+                    }
+                        break;
+                    case CPTContourBorderDimensionDirectionXBackward:
+                    {
+                        if ( startPoint.y == adjacentSideDimension && startPoint.x <= startSideDimension && startPoint.x >= endSideDimension ) {
+                            borderStrip.index = index;
+                            borderStrip.startPoint = startPoint;
+                            insertStrips(borderStrips, borderStrip);
+                        }
+                    }
+                        break;
+                    default:
+    //                case CPTContourBorderDimensionDirectionYBackward:
+                    {
+                        if ( startPoint.x == adjacentSideDimension && startPoint.y <= startSideDimension && startPoint.y >= endSideDimension ) {
+                            borderStrip.index = index;
+                            borderStrip.startPoint = startPoint;
+                            insertStrips(borderStrips, borderStrip);
+                        }
+                    }
+                        break;
+                }
+            }
+        }
+        index++;
+    }
+}
+
+-(void)drawBorderedIsoCurve:(nonnull CGContextRef)context contours:(COREPLOT_CONTOURS::CContours *)contours Plane:(unsigned int)iPlane BorderStrips:(Strips*)borderStrips ClosedStrips:(Strips*)closedStrips leftEdge:(CGFloat)leftEdge bottomEdge:(CGFloat)bottomEdge rightEdge:(CGFloat)rightEdge topEdge:(CGFloat)topEdge {
+    
+    CPTXYPlotSpace *thePlotSpace = static_cast<CPTXYPlotSpace *>(self.plotSpace);
+    BOOL pixelAlign = self.alignsPointsToPixels;
+    
+    COREPLOT_CONTOURS::CLineStripList *pStripList = contours->getListContour()->GetLines(iPlane);
+    COREPLOT_CONTOURS::CLineStrip *pStrip = NULL;
+    unsigned int index;
+    COREPLOT_CONTOURS::CLineStripList::iterator pos;
+    COREPLOT_CONTOURS::CLineStrip::iterator pos2;
+    
+    double x, y;
+    CGPoint point;
+    ContourPoints stripContours;
+    initContourPoints(&stripContours, 50);
+    
+    for (unsigned int i = 0; i < 4; i++) {
+        for( unsigned int j = 0; j < borderStrips[i].used; j++) {
+            unsigned int counter = 0;
+            for (pos = pStripList->begin(); pos != pStripList->end(); pos++) {
+                pStrip = *pos;
+                if( counter == borderStrips[i].array[j].index ) {
+                    break;
+                }
+                counter++;
+            }
+        
+            if (pStrip != NULL && !pStrip->empty()) {
+                for (pos2 = pStrip->begin(); pos2 != pStrip->end(); pos2++) {
+                    // retreiving index
+                    index=(*pos2);
+                    // drawing
+                    x = contours->getListContour()->GetXi(static_cast<int>(index));
+                    y = contours->getListContour()->GetYi(static_cast<int>(index));
+                    point = CGPointMake((x - thePlotSpace.xRange.locationDouble) * self.scaleX, (y - thePlotSpace.yRange.locationDouble) * self.scaleY);
+                    insertContourPoints(&stripContours, point);
+                }
+
+                if ( pixelAlign ) {
+                    [self alignViewPointsToUserSpace:stripContours.array withContext:context /*drawPointFlags:drawPointFlags*/ numberOfPoints:stripContours.used];
+                }
+
+                if ( stripContours.used > 0 ) {
+                    
+                    CGPathRef dataLinePath = [self newDataLinePathForViewPoints:stripContours.array indexRange: NSMakeRange(0, stripContours.used)];
+                    
+                    CGContextMoveToPoint(context, stripContours.array[0].x, stripContours.array[0].y);
+                    
+                    CGContextAddPath(context, dataLinePath);
+                    
+                    if ( i == 0 ) {  // bottom edge
+                        if (stripContours.array[stripContours.used - 1].x == rightEdge && stripContours.array[stripContours.used - 1].y > bottomEdge ) {
+                            CGContextAddLineToPoint(context, rightEdge, bottomEdge);
+                        }
+                        else if (stripContours.array[stripContours.used - 1].x == leftEdge && stripContours.array[stripContours.used - 1].y > bottomEdge ) {
+                            CGContextAddLineToPoint(context, leftEdge, bottomEdge);
+                        }
+                    }
+                    else if ( i == 1 ) {  // right edge
+                        if ( stripContours.array[stripContours.used - 1].y == topEdge && stripContours.array[stripContours.used - 1].x < rightEdge ) {
+                            CGContextAddLineToPoint(context, rightEdge, topEdge);
+                        }
+                        else if ( stripContours.array[stripContours.used - 1].y == bottomEdge && stripContours.array[stripContours.used - 1].x < rightEdge ) {
+                            CGContextAddLineToPoint(context, rightEdge, bottomEdge);
+                        }
+                    }
+                    else if ( i == 2 ) {  // top edge
+                        if ( stripContours.array[stripContours.used - 1].x == leftEdge && stripContours.array[stripContours.used - 1].y < topEdge ) {
+                            CGContextAddLineToPoint(context, leftEdge, topEdge);
+                        }
+                        else if ( stripContours.array[stripContours.used - 1].x == rightEdge && stripContours.array[stripContours.used - 1].y < topEdge ) {
+                            CGContextAddLineToPoint(context, rightEdge, topEdge);
+                        }
+                    }
+                    else if ( i == 3 ) { // left edge
+                        if ( stripContours.array[stripContours.used - 1].y == bottomEdge && stripContours.array[stripContours.used - 1].x > leftEdge ) {
+                            CGContextAddLineToPoint(context, leftEdge, bottomEdge);
+                        }
+                        else if ( stripContours.array[stripContours.used - 1].y == topEdge && stripContours.array[stripContours.used - 1].x > leftEdge ) {
+                            CGContextAddLineToPoint(context, leftEdge, topEdge);
+                        }
+                    }
+
+                    CGContextClosePath(context);
+                    
+                    CGPathRelease(dataLinePath);
+                    clearContourPoints(&stripContours);
+                }
+            }
+        }
+    }
+    if ( closedStrips->used > 0 ) {
+        for( unsigned int i = 0; i < closedStrips->used; i++) {
+            unsigned int counter = 0;
+            for (pos = pStripList->begin(); pos != pStripList->end(); pos++) {
+                pStrip = *pos;
+                if( counter == closedStrips->array[i].index ) {
+                    break;
+                }
+                counter++;
+            }
+        
+            if (pStrip != NULL && !pStrip->empty()) {
+                for (pos2 = pStrip->begin(); pos2 != pStrip->end(); pos2++) {
+                    // retreiving index
+                    index=(*pos2);
+                    // drawing
+                    x = contours->getListContour()->GetXi(static_cast<int>(index));
+                    y = contours->getListContour()->GetYi(static_cast<int>(index));
+                    point = CGPointMake((x - thePlotSpace.xRange.locationDouble) * self.scaleX, (y - thePlotSpace.yRange.locationDouble) * self.scaleY);
+                    insertContourPoints(&stripContours, point);
+                }
+
+                if ( pixelAlign ) {
+                    [self alignViewPointsToUserSpace:stripContours.array withContext:context /*drawPointFlags:drawPointFlags*/ numberOfPoints:stripContours.used];
+                }
+
+                if ( stripContours.used > 0 ) {
+                    
+                    CGPathRef dataLinePath = [self newDataLinePathForViewPoints:stripContours.array indexRange: NSMakeRange(0, stripContours.used)];
+                    
+                    CGContextMoveToPoint(context, stripContours.array[0].x, stripContours.array[0].y);
+                    
+                    CGContextAddPath(context, dataLinePath);
+                    
+                    CGPathRelease(dataLinePath);
+                    clearContourPoints(&stripContours);
+                }
+            }
+        }
+    }
+
+    freeContourPoints(&stripContours);
 }
 
 -(nonnull CGPathRef)newDataLinePathForViewPoints:(nonnull CGPoint *)viewPoints indexRange:(NSRange)indexRange {
@@ -2220,3 +2807,435 @@ void freeContourPoints(ContourPoints *a) {
 
 
 @end
+
+/*                   Kriging Interpolator
+                     written by Chao-yi Lang
+                     July, 1995
+                     lang@cs.cornell.edu
+
+*/
+ 
+//#include <dx/dx.h>
+//#include <stdio.h>
+//#include <string.h>
+//#include <math.h>
+//
+//char krig_fn[]="_krig.dx";
+//char vari_fn[]="_vari.dx";
+//float *D,*weight;
+//float result[2];
+//
+//float kriging_result(float *V, float i_f, float j_f, int dim, float *pos ,
+//        float *Z_s, int mode,int a, float c0, float c1);
+//int kriging(int *range, int mode, int item, float *Z_s, int *resol,
+//            float *pos, float c0, float c1,float a);
+//int *get_range(float *pos, int *range, int item);
+//
+//
+//Error m_Kriging(Object *in, Object *out)
+//{
+//    Array a1,a2,a3,a4;
+//    Object o = NULL;
+//    float x,*pos,*value,nugget,range_a,sill;
+//    int i, *resol_a, *range, range_default[4];
+//    char *method_a;
+//    char method_default[] = "exponential";
+//
+//
+//    int item, n, n1, rank, rank1, shape[3], shape1[3], method;
+//    Category category;
+//    Type type;
+//
+//    /* copy the structure of in[0] */
+//
+//    if (!in[0])  {
+//          DXSetError(ERROR_BAD_PARAMETER, "missing data parameter");
+//          goto error;
+//    }
+//
+//    if ( DXGetObjectClass(in[0]) != CLASS_FIELD) {
+//          DXSetError(ERROR_BAD_PARAMETER, "data is not a field");
+//          goto error;
+//    }
+//
+//    a1 = (Array) DXGetComponentValue((Field) in[0], "data");
+//    if (!a1) {
+//          DXSetError(ERROR_MISSING_DATA, "field has no data");
+//          return ERROR;
+//    }
+//
+//    DXGetArrayInfo(a1, &n, &type, &category, &rank, shape);
+//
+//    value = (float *) DXGetArrayData(a1);
+//
+//    a1 = (Array) DXGetComponentValue((Field) in[0], "positions");
+//    if (!a1) {
+//          DXSetError(ERROR_MISSING_DATA, "field has no positions");
+//          return ERROR;
+//    }
+//
+//    DXGetArrayInfo(a1, &n1, &type, &category, &rank1, shape1);
+//
+//    if ((rank1==1) && (shape1[0]==2)) {
+//          pos = (float *) DXGetArrayData(a1);
+//    }
+//    else {
+//        DXSetError(ERROR_MISSING_DATA, "input field must be rank:1 shape:2");
+//        return ERROR;
+//    }
+//
+//    if (!in[1]) {
+//    range = get_range( pos, range_default, n1*2 );
+//    }
+//    else {
+//        if ( DXGetObjectClass(in[1]) != CLASS_ARRAY) {
+//            DXSetError(ERROR_BAD_PARAMETER,"bad class");
+//            goto error;
+//        }
+//
+//        a2 = (Array)DXCopy(in[1], COPY_STRUCTURE);
+//        if (!a2)
+//            goto error;
+//
+//        if ( DXGetArrayClass(a2) != CLASS_ARRAY) {
+//            DXSetError(ERROR_BAD_PARAMETER,"bad array class");
+//            goto error;
+//        }
+//        DXGetArrayInfo(a2,&item,&type,&category,&rank,shape);
+//
+//        if (item != 2) {
+//            DXSetError(ERROR_BAD_PARAMETER, "range error");
+//            goto error;
+//        }
+//        range = (int *) DXGetArrayData(a2);
+//    }
+//
+//    if (!in[2]) {
+//        DXSetError(ERROR_BAD_PARAMETER, "missing data parameter");
+//        goto error;
+//    }
+//    if ( DXGetObjectClass(in[2]) != CLASS_ARRAY) {
+//        DXSetError(ERROR_BAD_PARAMETER,"resolution error");
+//        goto error;
+//    }
+//
+//    a1 = (Array)DXCopy(in[2], COPY_STRUCTURE);
+//
+//    if (!a1)
+//        goto error;
+//
+//    DXGetArrayInfo(a1,&item,&type,&category,&rank,shape);
+//
+//    resol_a = (int *) DXGetArrayData(a1);
+//
+//    if (item != 1) {
+//        DXSetError(ERROR_BAD_PARAMETER, "resolution error");
+//        goto error;
+//    }
+//
+//
+//    if (!in[3])
+//        method_a = method_default;
+//    else if ( DXGetObjectClass(in[3]) == CLASS_STRING )
+//            DXExtractString(in[3], &method_a);
+//         else {
+//            DXSetError(ERROR_BAD_PARAMETER,"method should be string");
+//            goto error;
+//         }
+//
+//    if ( strcasecmp( method_a, "spherical") == 0
+//       || strcasecmp( method_a, "1") == 0)
+//        method = 1;
+//    else if ( strcasecmp( method_a, "exponential") == 0
+//       || strcasecmp( method_a, "2") == 0)
+//        method = 2;
+//    else if ( strcasecmp( method_a, "gaussian") == 0
+//       || strcasecmp( method_a, "3") == 0)
+//        method = 3;
+//    else {
+//        DXSetError(ERROR_BAD_PARAMETER,"input method error");
+//        goto error;
+//    }
+//
+//    if (!in[4])  {
+//        DXSetError(ERROR_BAD_PARAMETER, "missing data parameter");
+//        goto error;
+//    }
+//    else
+//        DXExtractFloat(in[4], &range_a);
+//
+//    if (!in[5])  {
+//        DXSetError(ERROR_BAD_PARAMETER, "missing data parameter");
+//        goto error;
+//    }
+//    else
+//        DXExtractFloat(in[5], &nugget);
+//
+//    if (!in[6]) {
+//        DXSetError(ERROR_BAD_PARAMETER, "missing data parameter");
+//        goto error;
+//    }
+//    else
+//        DXExtractFloat(in[6], &sill);
+//
+//    kriging(range, method, n1, value, resol_a, pos, nugget, sill-nugget,
+//            range_a);
+//
+//    out[0]=DXImportDX(krig_fn,NULL,NULL,NULL,NULL);
+//    out[1]=DXImportDX(vari_fn,NULL,NULL,NULL,NULL);
+//    unlink(krig_fn);
+//    unlink(vari_fn);
+//    return OK;
+//
+//    error:
+//    return ERROR;
+//}
+//
+//
+//
+//
+//int kriging(int *range, int mode, int item, float *Z_s, int *resol,
+//            float *pos, float c0, float c1, float a) {
+//
+//    FILE *opt, *opt1;
+//    int dim,i,j,*ipiv,info;
+//    float xs,ys,zs,i_f,j_f,k,l,cnt_x,cnt_y;
+//    float begin_row,begin_col,end_row,end_col,*V,*Cd,*work,test_t;
+//    int resol_x, resol_y;
+//
+//
+//    /* initialize values */
+//    begin_row = (float) *(range);
+//    begin_col = (float) *(range+1);
+//    end_row = (float) *(range+2);
+//    end_col = (float) *(range+3);
+//    dim = item + 1;
+//    resol_x = *(resol);
+//    resol_y = *(resol+1);
+//
+//
+//    /* allocate V array */
+//    V = (float *) DXAllocate (sizeof (float) * dim * dim );
+//    D = (float *) DXAllocate (sizeof (float) * dim);
+//    weight = (float *) DXAllocate (sizeof (float) * dim);
+//
+//    /* allocate Cd array */
+//    Cd = (float *) DXAllocate (sizeof (float) * dim * dim );
+//
+//    /* caculate the distance between sample datas put into Cd array*/
+//    for ( i=0; i< dim-1 ;i++)
+//        for (j=i; j < dim-1 ; j++) {
+//            test_t =( pos[i*2]-pos[j*2] )*( pos[i*2]-pos[j*2])+
+//                    ( pos[i*2+1]-pos[j*2+1] )*( pos[i*2+1]-pos[j*2+1] );
+//            Cd[i*dim+j]= sqrt( test_t );
+//        }
+//    for ( i=0; i< dim-1 ;i++) {
+//        V[i*dim+dim-1]= 1;
+//        V[(dim-1)*(dim)+i]=1;
+//    }
+//    V[(dim-1)*(dim)+i] = 0;
+//
+//    /* caculate the variogram of sample datas and put into  V array */
+//    for ( i=0; i< dim-1 ;i++)
+//        for (j=i; j < dim-1; j++) {
+//            switch( mode ) {
+//                case 1 : /* Spher mode */
+//                         if ( Cd[i*dim+j] < a )
+//                            V[i*dim+j] = V[j*dim+i] = c0 + c1*(
+//                                  1.5*Cd[i*dim+j]/a - 0.5*(Cd[i*dim+j]/a)*
+//                                  (Cd[i*dim+j]/a)*(Cd[i*dim+j]/a));
+//                         else
+//                            V[i*dim+j] = V[j*dim+i] = c0 + c1;
+//                         break;
+//                case 2 : /* Expon mode */
+//                         V[i*dim+j] = V[j*dim+i] = c0 + c1 *( 1 -
+//                                  exp(-3*Cd[i*dim+j]/a) );
+//                         break;
+//                case 3 : /* Gauss mode */
+//                         V[i*dim+j] = V[j*dim+i] = c0 + c1 *( 1 -
+//                                  exp(-3*Cd[i*dim+j]*Cd[i*dim+j]/a/a));
+//                         break;
+//                default: fprintf(stderr, " mode error \n");
+//                         break;
+//            }
+//        }
+//
+//    /* release Cd array */
+//    DXFree(Cd);
+//    ipiv = (int *) DXAllocate (sizeof(int)*dim);
+//    work = (float *) DXAllocate (sizeof(float)*dim);
+//
+//    /* call inverse matrix function to inverse matrix C */
+//    sgetrf_(&dim,&dim,V,&dim,ipiv,&info);
+//    if ( info != 0) fprintf(stderr, "matrix error!!\n");
+//    sgetri_(&dim,V,&dim,ipiv,work,&dim,&info);
+//    if ( info != 0) fprintf(stderr, "matrix error!!\n");
+//
+//    DXFree(ipiv);
+//    DXFree(work);
+//
+//    /* create a temperate file to put result */
+//    opt = fopen(krig_fn,"w");
+//    if ( opt == NULL ) {
+//        fprintf(stderr,"error open output file\n");
+//        return(-1);
+//    }
+//
+//    opt1 = fopen(vari_fn,"w");
+//    if ( opt1 == NULL ) {
+//        fprintf(stderr,"error open output file\n");
+//        return(-1);
+//    }
+//
+//    /* for loop for each point of the estimated block */
+//    cnt_x = (end_row - begin_row)/ (float) resol_x;
+//    cnt_y = (end_col - begin_col)/ (float) resol_y;
+//    fprintf(opt,"object 1 class gridconnections counts %d %d\n",
+//            resol_x+1,resol_y+1);
+//    fprintf(opt,"attribute \"element type\" string \"quads\"\n");
+//    fprintf(opt,"attribute \"ref\" string \"positions\"\n");
+//    fprintf(opt,"#\n");
+//    fprintf(opt,"object 2 class array type float rank 1 shape 2 items %d data follows\n",(resol_x+1)*(resol_y+1));
+//
+//    fprintf(opt1,"object 1 class gridconnections counts %d %d\n",
+//            resol_x+1,resol_y+1);
+//    fprintf(opt1,"attribute \"element type\" string \"quads\"\n");
+//    fprintf(opt1,"attribute \"ref\" string \"positions\"\n");
+//    fprintf(opt1,"#\n");
+//    fprintf(opt1,"object 2 class array type float rank 1 shape 2 items %d data follows\n",(resol_x+1)*(resol_y+1));
+//
+//    for ( i = 0; i<= resol_x; i++) {
+//        i_f = cnt_x*i+begin_row;
+//        for ( j = 0; j<= resol_y; j++) {
+//           j_f=cnt_y*j+begin_col;
+//          /* call kriging subroutine */
+//           fprintf(opt,"%f %f\n",i_f,j_f);
+//           fprintf(opt1,"%f %f\n",i_f,j_f);
+//       l++;
+//        }
+//    }
+//    fprintf(opt,"#\n");
+//    fprintf(opt1,"#\n");
+//    fprintf(opt,"object 3 class array type float rank 0 items %d data follows\n", (resol_x+1)*(resol_y+1));
+//    fprintf(opt1,"object 3 class array type float rank 0 items %d data follows\n", (resol_x+1)*(resol_y+1));
+//    for ( i = 0; i<= resol_x; i++) {
+//        i_f = cnt_x*i+begin_row;
+//        for ( j = 0; j<= resol_y; j++) {
+//           j_f=cnt_y*j+begin_col;
+//          /* call kriging subroutine */
+//           kriging_result(V,i_f,j_f,dim,pos,Z_s,mode,a,c0,c1);
+//           fprintf(opt,"%f\n",result[0]);
+//           fprintf(opt1,"%f\n",result[1]);
+//        }
+//    }
+//    fprintf(opt,"attribute \"dep\" string \"positions\"\n");
+//    fprintf(opt,"#\n");
+//    fprintf(opt,"object \"default\" class field\n");
+//    fprintf(opt,"component \"connections\" value 1\n");
+//    fprintf(opt,"component \"positions\" value 2\n");
+//    fprintf(opt,"component \"data\" value 3\n");
+//    fprintf(opt,"#\n");
+//    fprintf(opt,"end\n");
+//    fclose(opt);
+//    fprintf(opt1,"attribute \"dep\" string \"positions\"\n");
+//    fprintf(opt1,"#\n");
+//    fprintf(opt1,"object \"default\" class field\n");
+//    fprintf(opt1,"component \"connections\" value 1\n");
+//    fprintf(opt1,"component \"positions\" value 2\n");
+//    fprintf(opt1,"component \"data\" value 3\n");
+//    fprintf(opt1,"#\n");
+//    fprintf(opt1,"end\n");
+//    fclose(opt1);
+//    DXFree(V);
+//    DXFree(D);
+//    DXFree(weight);
+//    return OK;
+//error:
+//    return ERROR;
+//}
+//
+//
+///*--------- kriging_result subroutine -----------*/
+//float kriging_result(float *V, float i_f, float j_f, int dim, float *pos,
+//        float *Z_s, int mode,int a, float c0, float c1) {
+//
+//    int i,j;
+//    float h;
+//
+///* caculate the distance between estimated point and sample datas */
+///* and caculate the variogram of estimated point and sample datas and
+//          put into D array */
+//    for (i=0; i < dim-1 ; i++) {
+//        h = sqrt( ( pos[i*2]-i_f )*( pos[i*2]-i_f ) +
+//                  ( pos[i*2+1]-j_f )*( pos[i*2+1]-j_f ) );
+//        switch( mode ) {
+//            case 1 : /* Spher mode */
+//                     if ( h < a )
+//                        D[i] = c0 + c1 * (1.5*h/a - 0.5*(h/a)*(h/a)*(h/a));
+//                     else
+//                        D[i] = c0 + c1;
+//                     break;
+//            case 2 : /* Expon mode */
+//                     D[i] = c0 + c1 * (1 - exp(-3*h/a));
+//                     break;
+//            case 3 : /* Gauss mode */
+//                     D[i] = c0 + c1 * (1 - exp(-3*h*h/a/a));
+//                     break;
+//            default: fprintf(stderr, " mode error \n");
+//                     break;
+//        }
+//    }
+//    D[i] = 1;
+//
+//    /* caculate the weights */
+//    for ( i = 0 ;i <= dim ;i++) {
+//       weight[i] = 0;
+//       for ( j = 0 ; j <= dim ; j++)
+//          weight[i] += V[i*dim+j] * D[j];
+//    }
+//
+//    /* caculate and return the estimated value */
+//    result[0] = 0;
+//    for ( i = 0 ;i < dim ;i++) {
+//        result[0] += weight[i] * Z_s[i];
+//    }
+///* result[0] : kriging result */
+///* result[1] : error variance result */
+//    result[0] = ( result[0] >= 0 ) ? result[0] : 0;
+//
+//    result[1] = 0;
+//    for ( i = 0 ;i < dim-1 ;i++) {
+//        result[1] += weight[i] * D[i];
+//    }
+//    result[1] += weight[dim-1];
+//    result[1] = sqrt(result[1]);
+//    return (1);
+//}
+//
+//
+///* get the maximum and minimum value of input range as default range */
+//int *get_range(float *pos, int *range, int item) {
+//
+//    float min_row, min_col, max_row, max_col;
+//    int i;
+//
+//    min_row = *pos;
+//    min_col = *(pos+1);
+//    max_row = *pos;
+//    max_col = *(pos+1);
+//
+//    for ( i=2; i<item; i+=2){
+//        if ( min_row > *(pos+i) ) min_row = *(pos+i);
+//        if ( min_col > *(pos+i+1) ) min_col = *(pos+i+1);
+//        if ( max_row < *(pos+i) ) max_row = *(pos+i);
+//        if ( max_col < *(pos+i+1) ) max_col = *(pos+i+1);
+//    }
+//
+//    *range = (int) min_row;
+//    *(range+1) = (int) min_col;
+//    *(range+2) = (int) max_row+1;
+//    *(range+3) = (int) max_col+1;
+//
+//    return ( range );
+//
+//}

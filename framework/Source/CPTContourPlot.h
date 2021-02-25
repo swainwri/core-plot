@@ -206,7 +206,7 @@ double TestFunction(double x,double y);
  *  @if MacOnly clicked bar. @endif
  *  @if iOSOnly touched bar. @endif
  **/
--(void) contourPlot:(nonnull  CPTContourPlot *)plot  contourTouchUpAtRecordIndex:(NSUInteger)idx;
+-(void) contourPlot:(nonnull  CPTContourPlot *)plot contourTouchUpAtRecordIndex:(NSUInteger)idx;
 
 /** @brief @optional Informs the delegate that a contour base point
  *  @if MacOnly was released. @endif
@@ -217,7 +217,7 @@ double TestFunction(double x,double y);
  *  @if iOSOnly touched bar. @endif
  *  @param event The event that triggered the selection.
  **/
--(void) contourPlot:(nonnull  CPTContourPlot *)plot  contourTouchUpAtRecordIndex:(NSUInteger)idx withEvent:(nonnull CPTNativeEvent *)event;
+-(void) contourPlot:(nonnull  CPTContourPlot *)plot contourTouchUpAtRecordIndex:(NSUInteger)idx withEvent:(nonnull CPTNativeEvent *)event;
 
 /// @}
 
@@ -231,15 +231,12 @@ double TestFunction(double x,double y);
 /// @{
 @property (nonatomic, readwrite, strong, nullable) CPTContourDataSourceBlock dataSourceBlock;
 /// @}
- 
-/// @name Contour Appearance Data Source
-/// @{
-@property (nonatomic, readwrite, cpt_weak_property, nullable) id<CPTPlotDataSource> contourAppearanceDataSource;
-/// @}
+
 
 /// @name Appearance
 /// @{
 @property (nonatomic, readwrite, copy, nullable) CPTLineStyle *isoCurveLineStyle;
+@property (nonatomic, readwrite, copy, nullable) CPTFill *isoCurveFill;
 @property (nonatomic, readwrite, assign) double minFunctionValue;
 @property (nonatomic, readwrite, assign) double maxFunctionValue;
 @property (nonatomic, readwrite, assign) NSUInteger noIsoCurves;
