@@ -103,11 +103,13 @@
     vectorFieldPlot.plotSpace = plotSpace;
     
     CPTFieldDataSourceBlock blockX       = ^(double xVal, double yVal) {
-                NSLog(@"%f %f", xVal, yVal);
+//                NSLog(@"%f %f", xVal, yVal);
+                yVal = 0;
                 return sin(xVal);
             };
     CPTFieldDataSourceBlock blockY       = ^(double xVal, double yVal) {
-                NSLog(@"%f %f", xVal, yVal);
+//                NSLog(@"%f %f", xVal, yVal);
+                xVal = 0;
                 return sin(yVal);
             };
     
